@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Towers</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1f; --muted: #8a8a8e; --line: #2b2b2e;
+    --thin: #c9c7c0; --sel: #ffe58a; --peer: #f1eee4; --same: #fff3c4;
+    --given: #1d1d1f; --entry: #2a5bd7; --bad: #d63b3b; --ok: #2f9e5b; --note: #6b6b70;
+    --btn: #ecebe6; --btn-on: #2a5bd7; --btn-on-ink: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17171a; --panel: #222226; --ink: #ececef; --muted: #8d8d94; --line: #d8d8dc;
+      --thin: #44444b; --sel: #6b5a17; --peer: #2b2b31; --same: #3e3820;
+      --given: #ececef; --entry: #7fa6ff; --bad: #ff6b6b; --ok: #5fd08e; --note: #a8a8b0;
+      --btn: #2e2e34; --btn-on: #4d7cf0; --btn-on-ink: #fff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    display: flex; justify-content: center; padding: 24px 16px;
+  }
+  main { display: flex; flex-direction: column; align-items: center; gap: 16px; max-width: 100%; }
+  h1 { margin: 0; font-size: 22px; letter-spacing: .02em; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; }
+  button, select {
+    font: inherit; border: 0; border-radius: 8px; padding: 7px 12px; cursor: pointer;
+    background: var(--btn); color: var(--ink);
+  }
+  button.on { background: var(--btn-on); color: var(--btn-on-ink); }
+  button:disabled { opacity: .4; cursor: default; }
+  label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
+
+  #board {
+    --cell: min(60px, calc((100vw - 32px) / (var(--n) + 2)));
+    display: grid;
+    grid-template-columns: repeat(calc(var(--n) + 2), var(--cell));
+    grid-template-rows: repeat(calc(var(--n) + 2), var(--cell));
+    user-select: none; outline: none;
+  }
+  .clue {
+    display: flex; align-items: center; justify-content: center;
+    font-size: calc(var(--cell) * .42); font-weight: 600; color: var(--ink); border-radius: 6px;
+  }
+  .clue.ok { color: var(--ok); }
+  .clue.bad { color: var(--bad); }
+  .setup .clue { cursor: pointer; }
+  .setup .clue:empty::after { content: "·"; color: var(--thin); }
+  .clue.sel { background: var(--sel); }
+
+  .cell {
+    position: relative; background: var(--panel); cursor: pointer;
+    border-right: 1px solid var(--thin); border-bottom: 1px solid var(--thin);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .cell.c0 { border-left: 2px solid var(--line); }
+  .cell.cl { border-right: 2px solid var(--line); }
+  .cell.r0 { border-top: 2px solid var(--line); }
+  .cell.rl { border-bottom: 2px solid var(--line); }
+  .cell.peer { background: var(--peer); }
+  .cell.same { background: var(--same); }
+  .cell.sel { background: var(--sel); }
+  .cell.badline { box-shadow: inset 0 0 0 2px var(--bad); }
+  .val { font-size: calc(var(--cell) * .55); color: var(--entry); }
+  .cell.given .val { color: var(--given); font-weight: 700; }
+  .cell.conflict .val { color: var(--bad); }
+  .notes {
+    position: absolute; inset: 3px; display: grid;
+    grid-template-columns: repeat(var(--k), 1fr);
+    align-items: center; justify-items: center;
+    font-size: calc(var(--cell) / (var(--k) + 1.2)); color: var(--note); line-height: 1;
+  }
+  .notes .gone { color: var(--bad); text-decoration: line-through; opacity: .6; }
+
+  #pad { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+  #pad button { min-width: 42px; font-size: 18px; padding: 8px 0; }
+  #msg { min-height: 1.4em; color: var(--muted); text-align: center; }
+  #msg.win { color: var(--ok); font-weight: 600; }
+  #msg.err { color: var(--bad); }
+  details { color: var(--muted); max-width: 520px; font-size: 13px; }
+  details summary { cursor: pointer; }
+  kbd { background: var(--btn); border-radius: 4px; padding: 0 5px; font: 12px ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Towers</h1>
+
+  <div class="bar">
+    <label>Size
+      <select id="size"></select>
+    </label>
+    <button id="modeSetup">Set up puzzle</button>
+    <button id="modeSolve">Solve</button>
+  </div>
+
+  <div id="board" tabindex="0"></div>
+
+  <div id="pad"></div>
+
+  <div class="bar" id="solveTools">
+    <button id="fill" title="Write every value that's still possible into each empty cell">Fill candidates</button>
+    <button id="clearNotes">Clear notes</button>
+    <label><input type="checkbox" id="autoClean" checked> Auto-remove notes</label>
+    <label><input type="checkbox" id="showWrong"> Mark impossible notes</label>
+  </div>
+  <div class="bar">
+    <button id="undo">Undo</button>
+    <button id="reset" title="Clear your entries and notes, keep the puzzle">Restart</button>
+    <button id="share" title="Copy a link that encodes this puzzle">Copy link</button>
+  </div>
+
+  <div id="msg"></div>
+
+  <details>
+    <summary>How to use</summary>
+    <p><b>Set up puzzle:</b> pick a size, click a clue square around the edge (or a grid cell, for a pre-filled value) and type a number. <kbd>0</kbd> or <kbd>Backspace</kbd> clears it.</p>
+    <p><b>Solve:</b> click a cell and type a number. Press <kbd>N</kbd> or the ✎ button to switch to notes, or hold <kbd>Shift</kbd> while typing to toggle a note. Arrow keys move, <kbd>⌘/Ctrl+Z</kbd> undoes.</p>
+    <p><b>Fill candidates</b> writes, into every empty cell, each value that fits at least one valid completion of its row and of its column, given the numbers you've placed and the clues. After that, it's up to you to eliminate. <b>Mark impossible notes</b> strikes through notes that this check rules out, without changing them.</p>
+    <p>A clue turns green once its line is full and correct, red if it's full and wrong. A row or column gets a red outline when no arrangement of it can satisfy its clues anymore.</p>
+  </details>
+</main>
+
+<script src="towers.js"></script>
+<script>
+const SIDES = ['top', 'bottom', 'left', 'right'];
+const STORE_KEY = 'towers-state-v1';
+
+let S;            // full state
+let undoStack = [];
+
+function blank(n) {
+  return {
+    n, mode: 'setup',
+    clues: Object.fromEntries(SIDES.map(s => [s, Array(n).fill(0)])),
+    given: grid(n, 0), values: grid(n, 0), notes: grid(n, 0),
+    sel: { kind: 'clue', side: 'top', i: 0 },
+    notesMode: false, autoClean: true, showWrong: false,
+  };
+}
+function grid(n, v) { return Array.from({ length: n }, () => Array(n).fill(v)); }
+function clone(x) { return JSON.parse(JSON.stringify(x)); }
+
+// Effective values on the board: givens plus the player's entries.
+function board() {
+  return S.values.map((row, r) => row.map((v, c) => S.given[r][c] || v));
+}
+
+// ---------- persistence ----------
+function encodePuzzle() {
+  const d = a => a.map(v => v || '.').join('');
+  return 'n=' + S.n + '&' + SIDES.map(s => s[0] + '=' + d(S.clues[s])).join('&') +
+    (S.given.flat().some(Boolean) ? '&g=' + d(S.given.flat()) : '');
+}
+function decodePuzzle(str) {
+  const p = new URLSearchParams(str);
+  const n = +p.get('n');
+  if (!(n >= 3 && n <= 9)) return null;
+  const st = blank(n);
+  const parse = (s, len) => {
+    const out = Array(len).fill(0);
+    for (let i = 0; i < Math.min(len, (s || '').length); i++) {
+      const v = +s[i];
+      if (v >= 1 && v <= n) out[i] = v;
+    }
+    return out;
+  };
+  for (const s of SIDES) st.clues[s] = parse(p.get(s[0]), n);
+  const g = parse(p.get('g'), n * n);
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) st.given[r][c] = g[r * n + c];
+  st.mode = 'solve';
+  st.sel = { kind: 'cell', r: 0, c: 0 };
+  return st;
+}
+function save() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) {}
+}
+function load() {
+  if (location.hash.length > 1) {
+    const st = decodePuzzle(location.hash.slice(1));
+    if (st) {
+      // Keep progress if the stored game is this same puzzle.
+      try {
+        const old = JSON.parse(localStorage.getItem(STORE_KEY));
+        if (old && old.n === st.n && JSON.stringify(old.clues) === JSON.stringify(st.clues) &&
+            JSON.stringify(old.given) === JSON.stringify(st.given)) return old;
+      } catch (e) {}
+      return st;
+    }
+  }
+  try {
+    const old = JSON.parse(localStorage.getItem(STORE_KEY));
+    if (old && old.n >= 3 && old.n <= 9) return old;
+  } catch (e) {}
+  return blank(5);
+}
+
+// ---------- edits ----------
+function commit(fn) {
+  undoStack.push(clone({ clues: S.clues, given: S.given, values: S.values, notes: S.notes }));
+  if (undoStack.length > 500) undoStack.shift();
+  fn();
+  render();
+}
+function undo() {
+  const prev = undoStack.pop();
+  if (!prev) return;
+  Object.assign(S, prev);
+  render();
+}
+
+function setDigit(v) {
+  const sel = S.sel;
+  if (!sel || v > S.n) return;
+  if (S.mode === 'setup') {
+    if (sel.kind === 'clue') commit(() => { S.clues[sel.side][sel.i] = v; });
+    else commit(() => {
+      S.given[sel.r][sel.c] = v;
+      S.values[sel.r][sel.c] = 0;
+      S.notes[sel.r][sel.c] = 0;
+    });
+    return;
+  }
+  if (sel.kind !== 'cell' || S.given[sel.r][sel.c]) return;
+  const { r, c } = sel;
+  if (v === 0) {
+    if (!S.values[r][c] && !S.notes[r][c]) return;
+    commit(() => {
+      if (S.values[r][c]) S.values[r][c] = 0;
+      else S.notes[r][c] = 0;
+    });
+  } else if (S.notesMode) {
+    toggleNote(v);
+  } else {
+    commit(() => {
+      S.values[r][c] = S.values[r][c] === v ? 0 : v;
+      if (S.values[r][c] && S.autoClean) {
+        const bit = 1 << v;
+        for (let k = 0; k < S.n; k++) { S.notes[r][k] &= ~bit; S.notes[k][c] &= ~bit; }
+      }
+    });
+  }
+}
+function toggleNote(v) {
+  const sel = S.sel;
+  if (S.mode !== 'solve' || sel.kind !== 'cell') return;
+  const { r, c } = sel;
+  if (S.given[r][c] || S.values[r][c] || v < 1 || v > S.n) return;
+  commit(() => { S.notes[r][c] ^= 1 << v; });
+}
+
+function fillCandidates() {
+  const { cand, badLines } = Towers.computeCandidates(S.n, S.clues, board());
+  commit(() => {
+    const b = board();
+    for (let r = 0; r < S.n; r++) for (let c = 0; c < S.n; c++)
+      S.notes[r][c] = b[r][c] ? 0 : cand[r][c];
+  });
+  if (badLines.length) flash('Some rows/columns can no longer be completed — check the red outlines.', 'err');
+}
+
+// ---------- selection ----------
+function move(dr, dc) {
+  const n = S.n, sel = S.sel;
+  // Position in the (n+2)x(n+2) layout, including the clue ring.
+  let R, C;
+  if (sel.kind === 'cell') { R = sel.r + 1; C = sel.c + 1; }
+  else ({ R, C } = cluePos(sel.side, sel.i));
+  const lo = S.mode === 'setup' ? 0 : 1, hi = S.mode === 'setup' ? n + 1 : n;
+  for (let step = 0; step < n + 2; step++) {
+    R = Math.min(hi, Math.max(lo, R + dr));
+    C = Math.min(hi, Math.max(lo, C + dc));
+    const t = targetAt(R, C);
+    if (t) { S.sel = t; render(); return; }
+    if ((R === lo || R === hi) && (C === lo || C === hi)) return; // stuck in a corner
+  }
+}
+function cluePos(side, i) {
+  if (side === 'top') return { R: 0, C: i + 1 };
+  if (side === 'bottom') return { R: S.n + 1, C: i + 1 };
+  if (side === 'left') return { R: i + 1, C: 0 };
+  return { R: i + 1, C: S.n + 1 };
+}
+function targetAt(R, C) {
+  const n = S.n;
+  const inR = R >= 1 && R <= n, inC = C >= 1 && C <= n;
+  if (inR && inC) return { kind: 'cell', r: R - 1, c: C - 1 };
+  if (R === 0 && inC) return { kind: 'clue', side: 'top', i: C - 1 };
+  if (R === n + 1 && inC) return { kind: 'clue', side: 'bottom', i: C - 1 };
+  if (C === 0 && inR) return { kind: 'clue', side: 'left', i: R - 1 };
+  if (C === n + 1 && inR) return { kind: 'clue', side: 'right', i: R - 1 };
+  return null;
+}
+
+// ---------- rendering ----------
+const $ = id => document.getElementById(id);
+let msgTimer;
+function flash(text, cls = '') {
+  const m = $('msg');
+  m.textContent = text;
+  m.className = cls;
+  clearTimeout(msgTimer);
+  if (cls !== 'win') msgTimer = setTimeout(() => { m.textContent = ''; m.className = ''; status(); }, 4000);
+}
+
+function render() {
+  const n = S.n, el = $('board');
+  const b = board();
+  const conflicts = Towers.conflicts(n, b);
+  const k = Math.ceil(Math.sqrt(n));
+  el.style.setProperty('--n', n);
+  el.style.setProperty('--k', k);
+  el.className = S.mode;
+  el.innerHTML = '';
+
+  // Only run the line check in solve mode; it doubles as the "mark impossible notes" source.
+  let check = null;
+  if (S.mode === 'solve') check = Towers.computeCandidates(n, S.clues, b);
+  const badRow = new Set(), badCol = new Set();
+  if (check) for (const l of check.badLines) (l.kind === 'row' ? badRow : badCol).add(l.index);
+
+  const sel = S.sel;
+  const selVal = sel && sel.kind === 'cell' ? b[sel.r][sel.c] : 0;
+
+  for (let R = 0; R < n + 2; R++) {
+    for (let C = 0; C < n + 2; C++) {
+      const t = targetAt(R, C);
+      const d = document.createElement('div');
+      d.style.gridRow = R + 1;
+      d.style.gridColumn = C + 1;
+      if (!t) { el.appendChild(d); continue; }
+
+      if (t.kind === 'clue') {
+        d.className = 'clue';
+        const v = S.clues[t.side][t.i];
+        if (v) d.textContent = v;
+        const st = S.mode === 'solve' && Towers.clueStatus(n, S.clues, b, t.side, t.i);
+        if (st) d.classList.add(st);
+        if (sel.kind === 'clue' && sel.side === t.side && sel.i === t.i && S.mode === 'setup') d.classList.add('sel');
+      } else {
+        const { r, c } = t;
+        d.className = 'cell';
+        if (c === 0) d.classList.add('c0');
+        if (c === n - 1) d.classList.add('cl');
+        if (r === 0) d.classList.add('r0');
+        if (r === n - 1) d.classList.add('rl');
+        if (sel.kind === 'cell') {
+          if (sel.r === r && sel.c === c) d.classList.add('sel');
+          else if (selVal && b[r][c] === selVal) d.classList.add('same');
+          else if (sel.r === r || sel.c === c) d.classList.add('peer');
+        }
+        if (badRow.has(r) || badCol.has(c)) d.classList.add('badline');
+        if (S.given[r][c]) d.classList.add('given');
+        if (conflicts[r][c]) d.classList.add('conflict');
+
+        if (b[r][c]) {
+          d.innerHTML = '<span class="val">' + b[r][c] + '</span>';
+        } else if (S.notes[r][c]) {
+          const notes = document.createElement('div');
+          notes.className = 'notes';
+          for (let v = 1; v <= n; v++) {
+            const s = document.createElement('span');
+            if (S.notes[r][c] & (1 << v)) {
+              s.textContent = v;
+              if (S.showWrong && check && !(check.cand[r][c] & (1 << v))) s.className = 'gone';
+            }
+            notes.appendChild(s);
+          }
+          d.appendChild(notes);
+        }
+      }
+      d.addEventListener('mousedown', e => {
+        e.preventDefault();
+        if (S.mode === 'solve' && t.kind === 'clue') return;
+        S.sel = t;
+        render();
+        el.focus();
+      });
+      el.appendChild(d);
+    }
+  }
+
+  renderPad();
+  $('modeSetup').classList.toggle('on', S.mode === 'setup');
+  $('modeSolve').classList.toggle('on', S.mode === 'solve');
+  $('solveTools').style.display = S.mode === 'solve' ? '' : 'none';
+  $('autoClean').checked = S.autoClean;
+  $('showWrong').checked = S.showWrong;
+  $('undo').disabled = !undoStack.length;
+  $('size').value = n;
+  status(conflicts);
+  save();
+}
+
+function renderPad() {
+  const pad = $('pad');
+  pad.innerHTML = '';
+  for (let v = 1; v <= S.n; v++) {
+    const bt = document.createElement('button');
+    bt.textContent = v;
+    bt.onmousedown = e => { e.preventDefault(); setDigit(v); };
+    pad.appendChild(bt);
+  }
+  const er = document.createElement('button');
+  er.textContent = '⌫';
+  er.title = 'Erase';
+  er.onmousedown = e => { e.preventDefault(); setDigit(0); };
+  pad.appendChild(er);
+  if (S.mode === 'solve') {
+    const nb = document.createElement('button');
+    nb.textContent = '✎';
+    nb.title = 'Notes mode (N)';
+    nb.classList.toggle('on', S.notesMode);
+    nb.onmousedown = e => { e.preventDefault(); S.notesMode = !S.notesMode; render(); };
+    pad.appendChild(nb);
+  }
+}
+
+function status(conflicts) {
+  const m = $('msg');
+  if (m.className === 'err') return; // let a pending flash finish
+  if (S.mode !== 'solve') {
+    m.className = '';
+    m.textContent = 'Setup: click a clue or cell and type a number. Then press Solve.';
+    return;
+  }
+  const n = S.n, b = board();
+  conflicts = conflicts || Towers.conflicts(n, b);
+  const full = b.every(row => row.every(Boolean));
+  const clean = !conflicts.flat().some(Boolean);
+  const cluesOk = SIDES.every(s => S.clues[s].every((_, i) => Towers.clueStatus(n, S.clues, b, s, i) !== 'bad'));
+  if (full && clean && cluesOk) { m.className = 'win'; m.textContent = 'Solved!'; }
+  else { m.className = ''; m.textContent = S.notesMode ? 'Notes mode' : ''; }
+}
+
+// ---------- wiring ----------
+function init() {
+  for (let n = 3; n <= 9; n++) {
+    const o = document.createElement('option');
+    o.value = n; o.textContent = n + '×' + n;
+    $('size').appendChild(o);
+  }
+  $('size').onchange = e => {
+    const n = +e.target.value;
+    const hasWork = SIDES.some(s => S.clues[s].some(Boolean)) || S.given.flat().some(Boolean) || S.values.flat().some(Boolean);
+    if (hasWork && !confirm('Start a new ' + n + '×' + n + ' puzzle? The current one will be cleared.')) {
+      e.target.value = S.n;
+      return;
+    }
+    S = blank(n);
+    undoStack = [];
+    history.replaceState(null, '', location.pathname);
+    render();
+  };
+  $('modeSetup').onclick = () => {
+    S.mode = 'setup';
+    render();
+  };
+  $('modeSolve').onclick = () => {
+    S.mode = 'solve';
+    if (S.sel.kind !== 'cell') S.sel = { kind: 'cell', r: 0, c: 0 };
+    history.replaceState(null, '', '#' + encodePuzzle());
+    render();
+    $('board').focus();
+  };
+  $('fill').onclick = fillCandidates;
+  $('clearNotes').onclick = () => commit(() => { S.notes = grid(S.n, 0); });
+  $('autoClean').onchange = e => { S.autoClean = e.target.checked; save(); };
+  $('showWrong').onchange = e => { S.showWrong = e.target.checked; render(); };
+  $('undo').onclick = undo;
+  $('reset').onclick = () => {
+    if (!confirm('Clear all your entries and notes?')) return;
+    commit(() => { S.values = grid(S.n, 0); S.notes = grid(S.n, 0); });
+  };
+  $('share').onclick = async () => {
+    const url = location.href.split('#')[0] + '#' + encodePuzzle();
+    try { await navigator.clipboard.writeText(url); flash('Link copied.'); }
+    catch (e) { prompt('Copy this link:', url); }
+  };
+
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const arrows = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+    if (arrows[e.key]) { e.preventDefault(); move(...arrows[e.key]); return; }
+    // e.code so Shift+digit still gives the digit on any keyboard layout.
+    const m = /^(?:Digit|Numpad)(\d)$/.exec(e.code);
+    if (m) {
+      e.preventDefault();
+      const v = +m[1];
+      if (e.shiftKey && v) toggleNote(v); else setDigit(v);
+      return;
+    }
+    if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); setDigit(0); return; }
+    if (e.key.toLowerCase() === 'n' && S.mode === 'solve') { S.notesMode = !S.notesMode; render(); }
+  });
+
+  S = load();
+  render();
+}
+init();
+</script>
+</body>
+</html>
